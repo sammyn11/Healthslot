@@ -1,6 +1,6 @@
 import { initSchema, db } from "./db.js";
 import { hashPassword } from "./auth.js";
-import { CLINIC_SLUG_ORDER } from "./clinicDefaults.js";
+import { CLINIC_SLUG_ORDER, DEMO_COORDINATOR_PASSWORD } from "./clinicDefaults.js";
 
 initSchema();
 
@@ -13,6 +13,7 @@ if (existing) {
 }
 
 const h = hashPassword("changeme123");
+const hCoordinator = hashPassword(DEMO_COORDINATOR_PASSWORD);
 
 db.prepare(`INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, 'System Administrator', 'admin')`).run(
   adminEmail,
@@ -22,8 +23,8 @@ db.prepare(`INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, '
 const getClinicId = db.prepare("SELECT id FROM clinics WHERE slug = ?");
 
 const insStaff = db.prepare(
-  `INSERT INTO users (email, password_hash, name, role, specialization, clinic_id, is_clinic_coordinator)
-   VALUES (?, ?, ?, 'staff', ?, ?, ?)`
+  `INSERT INTO users (email, password_hash, name, role, specialization, clinic_id, is_clinic_coordinator, coordinator_password_set)
+   VALUES (?, ?, ?, 'staff', ?, ?, ?, ?)`
 );
 
 for (let i = 0; i < CLINIC_SLUG_ORDER.length; i++) {
@@ -41,14 +42,16 @@ for (let i = 0; i < CLINIC_SLUG_ORDER.length; i++) {
     `Dr. Provider ${i + 1}`,
     "General Practice",
     cid,
-    0
+    0,
+    1
   );
   insStaff.run(
     `clinic${i + 1}@healthslot.local`,
-    h,
+    hCoordinator,
     `Clinic Coordinator ${i + 1}`,
     "Clinic reception / approvals",
     cid,
+    1,
     1
   );
 }
@@ -58,9 +61,9 @@ db.prepare(`INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, '
   h
 );
 
-console.log("Seeded users (password for all: changeme123)");
+console.log("Seeded users: admin/patient/providers use password changeme123");
+console.log("  Coordinators: use /clinic-login with the clinic password from server configuration.");
 console.log("  Admin:     admin@healthslot.local");
 console.log("  Patient:   patient@healthslot.local");
-console.log("  clinic1…clinic5@healthslot.local — coordinators (see patient dashboard for clinic names)");
 console.log("  dr.clinic1…dr.clinic5@healthslot.local — providers");
 db.close();

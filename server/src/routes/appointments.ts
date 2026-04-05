@@ -2,7 +2,12 @@ import { Router } from "express";
 import { db } from "../db.js";
 import { requireAuth, requireRoles, type AuthedRequest } from "../auth.js";
 import type { JwtPayload } from "../types.js";
-import { getAvailableTimes, pickFirstClinicAppointmentSlot, pickProviderForSlot } from "../slots.js";
+import {
+  getAvailableTimes,
+  pickFirstClinicAppointmentSlot,
+  pickNearestAvailableSlot,
+  pickProviderForSlot,
+} from "../slots.js";
 import { notifyUser } from "../notifications.js";
 import { logAudit } from "../audit.js";
 
@@ -93,19 +98,35 @@ r.post("/", requireRoles("patient"), (req, res) => {
   let appt_time: string;
   let sid: number;
   let staff: { id: number; name: string };
+  let time_adjusted = false;
 
-  if (bodyTime != null && String(bodyTime).length > 0) {
-    const picked = pickProviderForSlot(cid, String(appt_date), String(bodyTime));
-    if (!picked) {
-      return res.status(409).json({ error: "No provider available at this clinic for that time" });
+  if (bodyTime != null && String(bodyTime).trim().length > 0) {
+    const want = String(bodyTime).trim();
+    const picked = pickProviderForSlot(cid, String(appt_date), want);
+    if (picked) {
+      appt_time = want;
+      sid = picked.id;
+      staff = picked;
+    } else {
+      const next = pickNearestAvailableSlot(cid, String(appt_date), want);
+      if (!next) {
+        return res.status(409).json({
+          error:
+            "No open slot left at this clinic on that date. Try another day or contact the clinic.",
+        });
+      }
+      appt_time = next.appt_time;
+      sid = next.staff.id;
+      staff = next.staff;
+      time_adjusted = next.appt_time !== want;
     }
-    appt_time = String(bodyTime);
-    sid = picked.id;
-    staff = picked;
   } else {
     const first = pickFirstClinicAppointmentSlot(cid, String(appt_date));
     if (!first) {
-      return res.status(409).json({ error: "No openings at this clinic on that date—try another day" });
+      return res.status(409).json({
+        error:
+          "No open slot left at this clinic on that date. Try another day or contact the clinic.",
+      });
     }
     appt_time = first.appt_time;
     sid = first.staff.id;
@@ -127,11 +148,11 @@ r.post("/", requireRoles("patient"), (req, res) => {
       id,
       JSON.stringify({ clinic_id: cid, staff_id: sid, appt_date, appt_time })
     );
-    const msg = `Your appointment at ${clinic.name} on ${appt_date} at ${appt_time} is pending confirmation (${staff.name} was assigned).`;
+    const msg = `Your appointment at ${clinic.name} on ${appt_date} at ${appt_time} is pending — the clinic will approve it soon (${staff.name} was assigned).`;
     notifyUser(u.uid, msg, "email");
     const staffMsg = `New booking at ${clinic.name} for ${appt_date} at ${appt_time}.`;
     notifyUser(sid, staffMsg, "email");
-    res.status(201).json({ id, status: "pending", staff_id: sid, appt_time });
+    res.status(201).json({ id, status: "pending", staff_id: sid, appt_time, time_adjusted });
   } catch (e: unknown) {
     const err = e as { code?: string };
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
@@ -207,9 +228,17 @@ r.post("/:id/manage", requireRoles("staff", "admin"), (req, res) => {
   if (status === "confirmed" && row.status !== "cancelled") {
     db.prepare(`UPDATE appointments SET status = 'confirmed', updated_at = datetime('now') WHERE id = ?`).run(id);
     logAudit(u.uid, "appointment_approve", "appointment", id);
+    const clinicName =
+      (
+        db
+          .prepare(
+            `SELECT c.name FROM users s JOIN clinics c ON c.id = s.clinic_id WHERE s.id = ?`
+          )
+          .get(apptStaffId) as { name: string } | undefined
+      )?.name ?? "the clinic";
     notifyUser(
       Number(row.patient_id),
-      `Your appointment on ${row.appt_date} at ${row.appt_time} has been confirmed.`,
+      `Approved: your visit at ${clinicName} on ${row.appt_date} at ${row.appt_time} is confirmed. See your patient dashboard for details.`,
       "email"
     );
     return res.json({ ok: true, status: "confirmed" });

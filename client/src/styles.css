@@ -399,6 +399,10 @@ tbody tr:last-child td {
   color: #3d5a80;
 }
 
+tr.appt-row-approved td {
+  background: rgba(227, 245, 239, 0.4);
+}
+
 .stack-sm > * + * {
   margin-top: 0.5rem;
 }
@@ -614,9 +618,118 @@ tbody tr:last-child td {
   margin-bottom: 0.35rem;
 }
 
+/* ——— Clinic coordinator dashboard ——— */
+.clinic-dashboard-hero {
+  background: linear-gradient(135deg, var(--primary-soft) 0%, rgba(224, 122, 95, 0.12) 100%);
+  border: 1px solid var(--border-strong);
+}
+
+.clinic-dashboard-hero__eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--primary-hover);
+  margin: 0 0 0.35rem;
+}
+
+.clinic-dashboard-hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  margin: 0 0 0.5rem;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.clinic-pending-card h2 {
+  font-family: var(--font-display);
+}
+
 /* ——— Login clinic info box ——— */
 .info-panel {
   background: linear-gradient(145deg, #f0faf8 0%, #fff9f5 100%);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
+}
+
+.clinic-pick-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.clinic-pick-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.clinic-pick-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: var(--shadow);
+}
+
+.clinic-pick-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.clinic-pick-btn--active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: var(--shadow);
+}
+
+.coordinator-signin-panel {
+  padding: 1.1rem 1.25rem !important;
+}
+
+.clinic-login-page .clinic-login-card {
+  padding: 1.5rem 1.65rem;
+}
+
+.clinic-login-form .clinic-login-submit {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
+}
+
+.coordinator-signin-panel .ghost {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.clinic-pick-btn__sub {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.login-section-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}
+
+.login-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.35rem 0 1.15rem;
 }

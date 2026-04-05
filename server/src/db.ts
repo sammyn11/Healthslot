@@ -2,7 +2,8 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_CLINICS } from "./clinicDefaults.js";
+import { hashPassword } from "./auth.js";
+import { DEFAULT_CLINICS, CLINIC_SLUG_ORDER, DEMO_COORDINATOR_PASSWORD } from "./clinicDefaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.DATABASE_PATH ?? path.join(__dirname, "..", "data", "healthslot.db");
@@ -75,7 +76,26 @@ export function initSchema() {
   `);
   migrateNotificationsReadColumn();
   migrateUserClinicColumns();
+  migrateCoordinatorPasswordSet();
   ensureFiveNamedClinics();
+  normalizeDemoCoordinatorFlags();
+  ensureClinicCoordinators();
+  syncSeededCoordinatorDemoPassword();
+}
+
+/** Older rows may have NULL is_clinic_coordinator; SQLite treats NULL = 1 as false. */
+function normalizeDemoCoordinatorFlags() {
+  try {
+    const stmt = db.prepare(
+      `UPDATE users SET is_clinic_coordinator = 1
+       WHERE role = 'staff' AND clinic_id IS NOT NULL AND lower(email) = lower(?)`
+    );
+    for (let i = 0; i < CLINIC_SLUG_ORDER.length; i++) {
+      stmt.run(`clinic${i + 1}@healthslot.local`);
+    }
+  } catch (e) {
+    console.error("normalizeDemoCoordinatorFlags failed:", e);
+  }
 }
 
 /** Ensure exactly the five named clinics exist (insert or refresh name/address by slug). */
@@ -103,6 +123,108 @@ function migrateUserClinicColumns() {
     }
   } catch (e) {
     console.error("users clinic migration failed:", e);
+  }
+}
+
+/** Coordinators: 0 = first visit must set password at clinic; 1 = sign in with password. Existing rows default to 1. */
+function migrateCoordinatorPasswordSet() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+    if (!cols.map((c) => c.name).includes("coordinator_password_set")) {
+      db.exec(
+        `ALTER TABLE users ADD COLUMN coordinator_password_set INTEGER NOT NULL DEFAULT 1;`
+      );
+    }
+  } catch (e) {
+    console.error("coordinator_password_set migration failed:", e);
+  }
+}
+
+/**
+ * Ensures each named clinic has at least one active coordinator (demo accounts clinic1@ … clinic5@).
+ * Fixes "Clinic or coordinator not found" when the DB was never seeded or coordinators were removed.
+ */
+function ensureClinicCoordinators() {
+  try {
+    const h = hashPassword(DEMO_COORDINATOR_PASSWORD);
+    const getClinicId = db.prepare("SELECT id FROM clinics WHERE slug = ?");
+    const hasActiveCoord = db.prepare(
+      `SELECT id FROM users WHERE clinic_id = ? AND role = 'staff'
+       AND IFNULL(is_clinic_coordinator, 0) = 1 AND active = 1 ORDER BY id LIMIT 1`
+    );
+    const ins = db.prepare(
+      `INSERT INTO users (email, password_hash, name, role, specialization, clinic_id, is_clinic_coordinator, coordinator_password_set)
+       VALUES (?, ?, ?, 'staff', ?, ?, 1, 1)`
+    );
+
+    for (let i = 0; i < CLINIC_SLUG_ORDER.length; i++) {
+      const slug = CLINIC_SLUG_ORDER[i];
+      const clinicRow = getClinicId.get(slug) as { id: number } | undefined;
+      if (!clinicRow) {
+        console.warn(`[HealthSlot] Skipping coordinator: no clinic row for slug "${slug}"`);
+        continue;
+      }
+      const cid = clinicRow.id;
+      if (hasActiveCoord.get(cid)) continue;
+
+      const inactive = db
+        .prepare(
+          `SELECT id FROM users WHERE clinic_id = ? AND role = 'staff'
+           AND IFNULL(is_clinic_coordinator, 0) = 1 AND active = 0 ORDER BY id LIMIT 1`
+        )
+        .get(cid) as { id: number } | undefined;
+      if (inactive) {
+        db.prepare(
+          `UPDATE users SET active = 1, password_hash = ?, coordinator_password_set = 1 WHERE id = ?`
+        ).run(h, inactive.id);
+        continue;
+      }
+
+      const n = i + 1;
+      const email = `clinic${n}@healthslot.local`;
+      const byEmail = db
+        .prepare("SELECT id FROM users WHERE lower(email) = lower(?)")
+        .get(email) as { id: number } | undefined;
+      if (byEmail) {
+        db.prepare(
+          `UPDATE users SET role = 'staff', clinic_id = ?, is_clinic_coordinator = 1, active = 1,
+           password_hash = ?, coordinator_password_set = 1, name = ?, specialization = ?
+           WHERE id = ?`
+        ).run(
+          cid,
+          h,
+          `Clinic Coordinator ${n}`,
+          "Clinic reception / approvals",
+          byEmail.id
+        );
+        continue;
+      }
+
+      ins.run(email, h, `Clinic Coordinator ${n}`, "Clinic reception / approvals", cid);
+      console.log(`[HealthSlot] Added coordinator ${email} for clinic "${slug}"`);
+    }
+  } catch (e) {
+    console.error("ensureClinicCoordinators failed:", e);
+  }
+}
+
+/**
+ * Keeps `clinic1@healthslot.local` … `clinic5@` coordinator passwords aligned with DEMO_COORDINATOR_PASSWORD.
+ * Fixes older DBs seeded with `changeme123` so kiosk sign-in matches the configured coordinator password.
+ */
+function syncSeededCoordinatorDemoPassword() {
+  if (process.env.HEALTHSLOT_SKIP_DEMO_COORD_SYNC === "true") return;
+  try {
+    const h = hashPassword(DEMO_COORDINATOR_PASSWORD);
+    const stmt = db.prepare(
+      `UPDATE users SET password_hash = ?, coordinator_password_set = 1
+       WHERE role = 'staff' AND IFNULL(is_clinic_coordinator, 0) = 1 AND lower(email) = lower(?)`
+    );
+    for (let i = 0; i < CLINIC_SLUG_ORDER.length; i++) {
+      stmt.run(h, `clinic${i + 1}@healthslot.local`);
+    }
+  } catch (e) {
+    console.error("syncSeededCoordinatorDemoPassword failed:", e);
   }
 }
 

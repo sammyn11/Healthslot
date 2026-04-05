@@ -37,8 +37,8 @@ r.post("/staff", (req, res) => {
   const password_hash = hashPassword(String(password));
   const info = db
     .prepare(
-      `INSERT INTO users (email, password_hash, name, role, specialization, clinic_id, is_clinic_coordinator)
-       VALUES (?, ?, ?, 'staff', ?, ?, ?)`
+      `INSERT INTO users (email, password_hash, name, role, specialization, clinic_id, is_clinic_coordinator, coordinator_password_set)
+       VALUES (?, ?, ?, 'staff', ?, ?, ?, 1)`
     )
     .run(
       email,

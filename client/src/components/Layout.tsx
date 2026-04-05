@@ -38,8 +38,8 @@ export default function Layout() {
               <Link to="/login" className="btn secondary">
                 Log in
               </Link>
-              <Link to="/login#clinic-sign-in" className="btn ghost" style={{ fontSize: "0.9rem" }}>
-                Clinic / staff
+              <Link to="/clinic-login" className="btn ghost" style={{ fontSize: "0.9rem" }}>
+                Clinic login
               </Link>
               <Link to="/register" className="btn">
                 Register as patient
@@ -53,7 +53,17 @@ export default function Layout() {
                   My appointments
                 </Link>
               )}
-              {(user.role === "staff" || user.role === "admin") && (
+              {user.role === "staff" && user.is_clinic_coordinator && (
+                <Link to="/clinic" className="btn secondary">
+                  Clinic dashboard
+                </Link>
+              )}
+              {user.role === "staff" && !user.is_clinic_coordinator && (
+                <Link to="/staff" className="btn secondary">
+                  Staff schedule
+                </Link>
+              )}
+              {user.role === "admin" && (
                 <Link to="/staff" className="btn secondary">
                   Staff schedule
                 </Link>

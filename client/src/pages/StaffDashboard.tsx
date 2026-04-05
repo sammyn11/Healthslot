@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 
@@ -14,6 +15,7 @@ type Row = {
 
 type StaffOpt = { id: number; name: string };
 
+/** Daily schedule for providers and admins. Clinic coordinators use `/clinic` instead. */
 export default function StaffDashboard() {
   const { user } = useAuth();
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -37,28 +39,21 @@ export default function StaffDashboard() {
     });
   }, [user?.role]);
 
-  useEffect(() => {
-    if (!isCoordinator || !user?.clinic_id) return;
-    api<{ staff: { id: number; name: string }[] }>(`/api/staff-directory?clinic_id=${user.clinic_id}`).then((r) => {
-      setStaffList(r.staff.map((s) => ({ id: s.id, name: s.name })));
-    });
-  }, [isCoordinator, user?.clinic_id]);
-
   const load = useCallback(async () => {
     const qs = new URLSearchParams({ date });
     if (user?.role === "admin" && viewStaffId !== "") {
       qs.set("staff_id", String(viewStaffId));
-    } else if (isCoordinator && viewStaffId !== "") {
-      qs.set("staff_id", String(viewStaffId));
     }
     const { appointments } = await api<{ appointments: Row[] }>(`/api/staff/daily?${qs}`);
     setRows(appointments);
-  }, [date, user?.role, viewStaffId, isCoordinator]);
+  }, [date, user?.role, viewStaffId]);
 
   useEffect(() => {
     if (user?.role === "admin" && viewStaffId === "") return;
+    if (user?.role === "staff" && isCoordinator) return;
+    if (user?.role !== "staff" && user?.role !== "admin") return;
     load().catch(() => setRows([]));
-  }, [load, user?.role, viewStaffId]);
+  }, [load, user?.role, viewStaffId, isCoordinator]);
 
   async function confirm(id: number) {
     setErr("");
@@ -86,14 +81,16 @@ export default function StaffDashboard() {
     }
   }
 
+  if (isCoordinator) {
+    return <Navigate to="/clinic" replace />;
+  }
+
   return (
     <main className="main-page">
       <header className="dashboard-title">
-        <h1>{isCoordinator ? "Clinic approvals" : "Staff schedule"}</h1>
+        <h1>Staff schedule</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
-          {isCoordinator
-            ? `Pending and confirmed visits at ${user?.clinic_name ?? "your clinic"}. Approve or update appointments.`
-            : "Daily appointments, approve and record attendance (FR 4)."}
+          Daily appointments, approve and record attendance (FR 4).
         </p>
       </header>
 
@@ -118,23 +115,6 @@ export default function StaffDashboard() {
             </select>
           </div>
         )}
-        {isCoordinator && (
-          <div>
-            <label htmlFor="docpick">Filter by provider (optional)</label>
-            <select
-              id="docpick"
-              value={viewStaffId === "" ? "" : String(viewStaffId)}
-              onChange={(e) => setViewStaffId(e.target.value ? Number(e.target.value) : "")}
-            >
-              <option value="">All providers at this clinic</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
       {err && <p className="error">{err}</p>}
@@ -142,51 +122,49 @@ export default function StaffDashboard() {
       <div className="card">
         <h2>Appointments for {date}</h2>
         <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              {isCoordinator && <th>Provider</th>}
-              <th>Patient</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.appt_time}</td>
-                {isCoordinator && <td>{r.staff_name ?? "—"}</td>}
-                <td>
-                  {r.patient_name}
-                  <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{r.patient_email}</div>
-                </td>
-                <td>
-                  <span className={`badge ${r.status}`}>{r.status}</span>
-                </td>
-                <td>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
-                    {r.status === "pending" && (
-                      <button type="button" onClick={() => confirm(r.id)}>
-                        Confirm
-                      </button>
-                    )}
-                    {r.status === "confirmed" && (
-                      <>
-                        <button type="button" onClick={() => mark(r.id, "completed")}>
-                          Completed
-                        </button>
-                        <button type="button" className="secondary" onClick={() => mark(r.id, "no_show")}>
-                          No-show
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Patient</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.appt_time}</td>
+                  <td>
+                    {r.patient_name}
+                    <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{r.patient_email}</div>
+                  </td>
+                  <td>
+                    <span className={`badge ${r.status}`}>{r.status}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                      {r.status === "pending" && (
+                        <button type="button" onClick={() => confirm(r.id)}>
+                          Confirm
+                        </button>
+                      )}
+                      {r.status === "confirmed" && (
+                        <>
+                          <button type="button" onClick={() => mark(r.id, "completed")}>
+                            Completed
+                          </button>
+                          <button type="button" className="secondary" onClick={() => mark(r.id, "no_show")}>
+                            No-show
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
         {rows.length === 0 && <p className="muted">No appointments this day.</p>}
       </div>

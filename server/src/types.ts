@@ -9,6 +9,8 @@ export type UserRow = {
   specialization: string | null;
   clinic_id?: number | null;
   is_clinic_coordinator?: number;
+  /** 0 = coordinator must set password via clinic kiosk once; 1 = use password on clinic sign-in */
+  coordinator_password_set?: number;
   active: number;
   created_at: string;
 };

@@ -1,6 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { Link } from "react-router-dom";
+import { BOOKING_SLOT_TIMES } from "../bookingSlotTimes";
+
+function localISODate(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function appointmentStatusShort(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "confirmed":
+      return "Approved";
+    case "cancelled":
+      return "Cancelled";
+    case "completed":
+      return "Completed";
+    case "missed":
+      return "Missed";
+    case "no_show":
+      return "No-show";
+    default:
+      return status;
+  }
+}
 
 type Clinic = { id: number; name: string; address: string | null; slug: string };
 type Appt = {
@@ -18,7 +45,8 @@ export default function PatientDashboard() {
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [clinicsLoading, setClinicsLoading] = useState(true);
   const [clinicId, setClinicId] = useState<number | "">("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localISODate());
+  const [slot, setSlot] = useState(() => BOOKING_SLOT_TIMES[0] ?? "");
   const [list, setList] = useState<Appt[]>([]);
   const [notifications, setNotifications] = useState<
     { id: number; message: string; is_read: number }[]
@@ -26,7 +54,7 @@ export default function PatientDashboard() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [rescheduleId, setRescheduleId] = useState<number | "">("");
-  const [rDate, setRDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [rDate, setRDate] = useState(() => localISODate());
   const [rTimes, setRTimes] = useState<string[]>([]);
   const [rSlot, setRSlot] = useState("");
 
@@ -55,6 +83,14 @@ export default function PatientDashboard() {
     loadNotifications();
   }, [loadAppointments, loadNotifications]);
 
+  useEffect(() => {
+    if (clinicId === "" || !date) {
+      setSlot("");
+      return;
+    }
+    setSlot((prev) => (BOOKING_SLOT_TIMES.includes(prev) ? prev : BOOKING_SLOT_TIMES[0] ?? ""));
+  }, [clinicId, date]);
+
   const rescheduleStaffId = list.find((a) => a.id === rescheduleId)?.staff_id;
 
   useEffect(() => {
@@ -63,8 +99,9 @@ export default function PatientDashboard() {
       return;
     }
     api<{ times: string[] }>(`/api/staff-directory/${rescheduleStaffId}/slots?date=${rDate}`).then((r) => {
-      setRTimes(r.times);
-      setRSlot(r.times[0] ?? "");
+      const times = r.times.length > 0 ? r.times : BOOKING_SLOT_TIMES;
+      setRTimes(times);
+      setRSlot((prev) => (times.includes(prev) ? prev : times[0] ?? ""));
     });
   }, [rescheduleStaffId, rDate, list, rescheduleId]);
 
@@ -72,16 +109,29 @@ export default function PatientDashboard() {
     e.preventDefault();
     setErr("");
     setMsg("");
+    if (clinicId === "" || !slot) {
+      setErr("Choose a clinic, date, and visit time.");
+      return;
+    }
     try {
-      const created = await api<{ appt_time: string }>("/api/appointments", {
+      const created = await api<{
+        appt_time: string;
+        status: string;
+        time_adjusted?: boolean;
+      }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
           clinic_id: clinicId,
           appt_date: date,
+          appt_time: slot,
         }),
       });
+      const adjusted =
+        created.time_adjusted === true
+          ? " That time was busy, so the system booked the next available slot at the same clinic."
+          : "";
       setMsg(
-        `Booking request for ${date} at ${created.appt_time}. A clinician at this clinic was assigned; you will be notified when it is confirmed.`
+        `Request sent for ${date} at ${created.appt_time}.${adjusted} It is linked to your clinic and will show as “waiting for approval” until the clinic confirms it.`
       );
       loadAppointments();
       loadNotifications();
@@ -147,8 +197,9 @@ export default function PatientDashboard() {
       <div className="card">
         <h2>Book an appointment</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Choose a clinic and visit date. The earliest open slot that day is reserved for you and a clinician is
-          assigned automatically.
+          Choose your clinic, day, and preferred time. If that exact time is already taken, we still book you into the
+          next open slot that day when possible. The visit stays <strong>pending</strong> until the clinic approves it;
+          then it appears here as <strong>approved</strong>.
         </p>
         <form onSubmit={book} className="grid two">
           <div>
@@ -177,10 +228,35 @@ export default function PatientDashboard() {
           </div>
           <div>
             <label htmlFor="d">Visit date</label>
-            <input id="d" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            <input
+              id="d"
+              type="date"
+              min={localISODate()}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="appt-slot">Visit time</label>
+            <select
+              id="appt-slot"
+              value={slot}
+              onChange={(e) => setSlot(e.target.value)}
+              required
+              disabled={clinicId === ""}
+            >
+              {clinicId === "" && <option value="">Select a clinic first</option>}
+              {clinicId !== "" &&
+                BOOKING_SLOT_TIMES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+            </select>
           </div>
           <div style={{ alignSelf: "end" }}>
-            <button type="submit" disabled={clinicId === ""}>
+            <button type="submit" disabled={clinicId === "" || !slot}>
               Request booking
             </button>
           </div>
@@ -211,13 +287,13 @@ export default function PatientDashboard() {
           </div>
           <div>
             <label>New date</label>
-            <input type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} required />
+            <input type="date" min={localISODate()} value={rDate} onChange={(e) => setRDate(e.target.value)} required />
           </div>
           <div>
             <label>New time</label>
             <select value={rSlot} onChange={(e) => setRSlot(e.target.value)} required>
               {rTimes.length === 0 && <option value="">Pick appointment & date first</option>}
-              {rTimes.map((t) => (
+              {(rTimes.length > 0 ? rTimes : BOOKING_SLOT_TIMES).map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
@@ -225,7 +301,7 @@ export default function PatientDashboard() {
             </select>
           </div>
           <div style={{ alignSelf: "end" }}>
-            <button type="submit" disabled={rescheduleId === "" || !rTimes.length}>
+            <button type="submit" disabled={rescheduleId === "" || !rSlot}>
               Reschedule
             </button>
           </div>
@@ -248,13 +324,28 @@ export default function PatientDashboard() {
           </thead>
           <tbody>
             {list.map((a) => (
-              <tr key={a.id}>
+              <tr
+                key={a.id}
+                className={a.status === "confirmed" ? "appt-row-approved" : undefined}
+              >
                 <td>{a.appt_date}</td>
                 <td>{a.appt_time}</td>
                 <td>{a.clinic_name ?? "—"}</td>
                 <td>{a.staff_name}</td>
                 <td>
-                  <span className={`badge ${a.status}`}>{a.status}</span>
+                  <span className={`badge ${a.status}`}>
+                    {appointmentStatusShort(a.status)}
+                  </span>
+                  {a.status === "pending" && (
+                    <div className="muted" style={{ fontSize: "0.8rem", marginTop: "0.25rem" }}>
+                      Waiting for clinic approval.
+                    </div>
+                  )}
+                  {a.status === "confirmed" && (
+                    <div className="muted" style={{ fontSize: "0.8rem", marginTop: "0.25rem" }}>
+                      Successfully approved by your clinic.
+                    </div>
+                  )}
                 </td>
                 <td>
                   {a.status !== "cancelled" && a.status !== "completed" && (

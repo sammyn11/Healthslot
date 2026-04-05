@@ -1,8 +1,8 @@
 import { db } from "./db.js";
 
-/** ISO date YYYY-MM-DD */
-const SLOT_START_MIN = 8 * 60;
-const SLOT_END_MIN = 17 * 60;
+/** ISO date YYYY-MM-DD — any calendar day; times are clinic local window */
+const SLOT_START_MIN = 7 * 60;
+const SLOT_END_MIN = 19 * 60;
 const STEP = 30;
 
 function minutesToTime(m: number): string {
@@ -31,8 +31,12 @@ export function getAvailableTimes(staffId: number, apptDate: string): string[] {
   return slotTimesForDay().filter((t) => !taken.has(t));
 }
 
+/**
+ * Providers who take visits (non-coordinators). If a clinic has none, fall back to any active staff
+ * (e.g. coordinator only) so bookings are never impossible for lack of a “doctor” row.
+ */
 export function providerIdsAtClinic(clinicId: number): number[] {
-  const rows = db
+  const providers = db
     .prepare(
       `SELECT id FROM users
        WHERE clinic_id = ? AND role = 'staff' AND active = 1
@@ -40,7 +44,15 @@ export function providerIdsAtClinic(clinicId: number): number[] {
        ORDER BY id`
     )
     .all(clinicId) as { id: number }[];
-  return rows.map((r) => r.id);
+  if (providers.length > 0) return providers.map((r) => r.id);
+  const anyStaff = db
+    .prepare(
+      `SELECT id FROM users
+       WHERE clinic_id = ? AND role = 'staff' AND active = 1
+       ORDER BY IFNULL(is_clinic_coordinator, 0) ASC, id`
+    )
+    .all(clinicId) as { id: number }[];
+  return anyStaff.map((r) => r.id);
 }
 
 /** Union of open times across all providers at the clinic (sorted). */
@@ -52,17 +64,37 @@ export function mergeAvailableTimesAtClinic(clinicId: number, apptDate: string):
   return slotTimesForDay().filter((t) => open.has(t));
 }
 
-/** Earliest open slot at the clinic on that day plus an assigned provider. */
+/** Walk the day in order; first time where some assignable staff is free. */
 export function pickFirstClinicAppointmentSlot(
   clinicId: number,
   apptDate: string
 ): { appt_time: string; staff: { id: number; name: string } } | null {
-  const times = mergeAvailableTimesAtClinic(clinicId, apptDate);
-  if (times.length === 0) return null;
-  const appt_time = times[0];
-  const staff = pickProviderForSlot(clinicId, apptDate, appt_time);
-  if (!staff) return null;
-  return { appt_time, staff };
+  for (const t of slotTimesForDay()) {
+    const staff = pickProviderForSlot(clinicId, apptDate, t);
+    if (staff) return { appt_time: t, staff };
+  }
+  return null;
+}
+
+/**
+ * After a preferred time is unavailable: try later slots the same day, then earlier ones.
+ * (So we do not jump to 07:00 when the patient asked for 10:00.)
+ */
+export function pickNearestAvailableSlot(
+  clinicId: number,
+  apptDate: string,
+  preferredTime: string
+): { appt_time: string; staff: { id: number; name: string } } | null {
+  const slots = slotTimesForDay();
+  const preferred = String(preferredTime);
+  const idx = slots.indexOf(preferred);
+  const order =
+    idx === -1 ? slots : [...slots.slice(idx + 1), ...slots.slice(0, idx + 1)];
+  for (const t of order) {
+    const staff = pickProviderForSlot(clinicId, apptDate, t);
+    if (staff) return { appt_time: t, staff };
+  }
+  return null;
 }
 
 /** First available provider at the clinic for this slot (stable order by staff id). */

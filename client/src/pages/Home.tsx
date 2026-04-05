@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
+import { homeAfterLogin } from "../dashboardPaths";
 
 const IMG_HERO =
   "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1400&q=80";
@@ -25,8 +26,8 @@ export default function Home() {
               <Link to="/login" className="btn secondary">
                 Sign in
               </Link>
-              <Link to="/login#clinic-sign-in" className="btn secondary">
-                Clinic / staff sign in
+              <Link to="/clinic-login" className="btn secondary">
+                Clinic coordinator sign in
               </Link>
             </div>
           )}
@@ -37,7 +38,14 @@ export default function Home() {
               </Link>
             </div>
           )}
-          {(user?.role === "staff" || user?.role === "admin") && (
+          {user?.role === "staff" && (
+            <div className="hero-actions">
+              <Link to={homeAfterLogin(user)} className="btn">
+                {user.is_clinic_coordinator ? "Open clinic dashboard" : "Open staff schedule"}
+              </Link>
+            </div>
+          )}
+          {user?.role === "admin" && (
             <div className="hero-actions">
               <Link to="/staff" className="btn">
                 Open staff schedule
@@ -66,10 +74,9 @@ export default function Home() {
           </div>
           <h2>For clinic teams</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            Providers see their own schedule; clinic coordinators see every appointment at their facility and
-            confirm bookings. Use{" "}
-            <Link to="/login#clinic-sign-in">Clinic / staff sign in</Link>—same log-in form as everyone else,
-            with your work email. Administrators manage users and reports.
+            Providers use the staff schedule; coordinators open their <strong>clinic dashboard</strong> after
+            signing in with their location to approve visits. Start at{" "}
+            <Link to="/clinic-login">Clinic sign-in</Link>. Administrators manage users and reports.
           </p>
         </div>
       </div>
